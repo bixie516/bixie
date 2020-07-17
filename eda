@@ -1,0 +1,155 @@
+from scipy.io import loadmat
+import neurokit2 as nk
+import matplotlib.pyplot as plt
+import numpy as np
+from tensorpac import Pac
+from tensorpac.utils import PSD
+
+
+
+def cosine_similarity(x,y):
+    num = x.dot(y.T)
+    denom = np.linalg.norm(x) * np.linalg.norm(y)
+    return num / denom
+
+#输入文件编号，返回拼接好的文件路径
+def getpath(filename):
+    path = './data_preprocessed/Data_Preprocessed_P'
+    path += filename
+    path += '/Data_Preprocessed_P'
+    path += filename
+    path += '.mat'
+    return path
+
+#加载处理过的gsr数据，返回scr数据
+def loadscr(filename):
+    filepath = getpath(filename)
+    #print(filepath)
+    data = loadmat(filepath)
+    data1 = data['joined_data'][0]
+    for i in range(20):
+        gsrdata = data1[i][16]
+        print(gsrdata)
+
+def gettags(videoid):
+    # hahv:0, lahv:1, lalv:2, halv:3
+    lahv = ['10', '13', '18', '58']
+    hahv = ['4', '5', '9', '80']
+    lalv = ['19', '20', '23', '138']
+    halv = ['30', '31', '34', '36']
+    ss = str(videoid)
+    if ss in lahv:
+        return 1
+    elif ss in hahv:
+        return 0
+    elif ss in lalv:
+        return 2
+    elif ss in halv:
+        return 3
+    else:
+        return 4
+
+def getpca(filename):
+    print(filename)
+    filepath = getpath(filename)
+    data = loadmat(filepath)
+    datatags = data['VideoIDs'][0]
+    tags = []
+    for i in range(16):
+        tags.append(gettags(datatags[i][0]))
+
+    #print(tags)
+    data1 = data['joined_data'][0]
+
+    frequ = [0.1, 1, 10, 20, 30, 40, 50]
+    res = []
+    resmean = []
+    for i in range(16):
+        data2 = data1[i]
+        ecgleft = []
+        ecgright = []
+        gsrdata = []
+        eegdata = []
+        #转置
+        for j in range(len(data2)):
+            ecgleft.append(data2[j][14])
+            ecgright.append(data2[j][15])
+            gsrdata.append(data2[j][16])
+            eegdata.append(data2[j][5])
+
+        #清洗数据
+        ecg1 = nk.ecg_clean(ecgleft, sampling_rate=128)
+        ecg2 = nk.ecg_clean(ecgright, sampling_rate=128)
+        gsr = nk.eda_clean(gsrdata, sampling_rate=128)
+        eeg = np.array(eegdata)
+        # 获得scr
+        scrdata = nk.eda_phasic(nk.standardize(gsr), sampling_rate=128)
+        scr = scrdata['EDA_Phasic']
+        scl = scrdata['EDA_Tonic']
+        #print(np.array(scr))
+        #plt.plot(scr)
+        #plt.show()
+        sf = 128.
+        #开始 结束 宽度 步长
+        p = Pac(idpac=(6, 2, 0), f_pha=(.1, 45, 1, 5), f_amp=(.1, 10, 1, .5))
+        xpac = p.filterfit(sf, x_pha=eeg, x_amp=scr, n_perm=200, p=.05)
+        pval = p.pvalues
+        #print(xpac.mean())
+        res.append(xpac.max())
+        resmean.append(xpac.mean())
+
+        #p.comodulogram(xpac.mean(-1), title=str(p), cmap='Spectral_r', vmin=0.,
+        #               pvalues=pval, levels=.05)
+        #picname = filename + '-' + str(i)
+        #p.savefig('./resSCRpic/' + picname + '.jpg')
+        #p.show()
+    print(res)
+    print(resmean)
+    return res, resmean
+
+def getselftags(filename):
+    #print(filename)
+    filepath = getpath(filename)
+    data = loadmat(filepath)
+    datatags = data['labels_selfassessment'][0]
+    tags = [[0] * 2 for row in range(16)]
+    #print(tags)
+    for i in range(16):
+        tags[i][0] = datatags[i][0][0]
+        tags[i][1] = datatags[i][0][1]
+
+    return tags
+
+
+if __name__ == '__main__':
+    #getpca('01')
+
+    resss = []
+    reskk = []
+    for i in range(40):
+        if i < 9:
+            if i != 8:
+                filenum = '0' + str(i + 1)
+                s1, s2 = getpca(filenum)
+                reskk.append(s2)
+                resss.append(s1)
+        elif i != 16 and i != 25:
+            if i != 11:
+                if i < 20:
+                    s1, s2 = getpca(str(i + 1))
+                    reskk.append(s2)
+                    resss.append(s1)
+
+    filename = 'max_sclscr.txt'
+    with open(filename, 'w') as file_object:
+        for k in range(len(resss)):
+            file_object.write(str(resss[k]) + ',' + '\n')
+    print(resss)
+
+    filename = 'mean_sclscr.txt'
+    with open(filename, 'w') as file_object:
+        for k in range(len(reskk)):
+            file_object.write(str(reskk[k]) + ',' + '\n')
+    print(reskk)
+
+
